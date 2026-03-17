@@ -37,4 +37,4 @@ The server listens on `http://localhost:8080`. Point your MCP client at it with 
 
 ## Origins
 
-Engram is derived from the Go server component of [Open Brain](https://github.com/jdugan1024/ob1), a persistent AI memory system. Open Brain provides the database schema, extension architecture, and learning path that Engram builds on.
+Engram is derived from [Open Brain](https://github.com/NateBJones-Projects/OB1) by Nate B. Jones, a persistent AI memory system. Open Brain provides the database schema, extension architecture, and learning path that Engram builds on.
