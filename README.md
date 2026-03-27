@@ -11,20 +11,20 @@ A self-hosted MCP server for persistent AI memory, built in Go. Engram gives any
 
 ## Quick start
 
+Secrets are managed with [SOPS](https://github.com/getsops/sops) + [age](https://github.com/FiloSottile/age). The encrypted secrets file is `secrets/engram.env`.
+
 ```bash
-# Configure secrets
-cat > .env <<'EOF'
-OPENROUTER_API_KEY=sk-or-your-key-here
-POSTGRES_PASSWORD=pick-a-pg-password
-APP_USER_PASSWORD=pick-an-app-password
-EOF
+# Edit secrets (opens decrypted in $EDITOR, re-encrypts on save)
+sops secrets/engram.env
 
 # Start the server
-docker compose up -d
+sops exec-env secrets/engram.env 'docker compose up -d'
 
 # Watch logs
 docker compose logs -f
 ```
+
+Requires `SOPS_AGE_KEY_FILE` pointing to your age private key (see homelab `docs/secrets.md`).
 
 The server listens on `http://localhost:8080`. Point your MCP client at it with your user access key.
 

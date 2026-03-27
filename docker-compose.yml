@@ -26,6 +26,7 @@ services:
 
   server:
     build: .
+    container_name: engram
     restart: unless-stopped
     depends_on:
       db:
