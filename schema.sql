@@ -7,13 +7,13 @@ CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- ---------------------------------------------------------------------------
 -- Users
--- Each user has a random access_key they put in their Claude Desktop connector URL.
+-- Each user is identified by their OIDC subject from Authelia.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS mcp_users (
-    id         UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
-    name       TEXT        NOT NULL,
-    access_key TEXT        NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ DEFAULT now()
+    id           UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    name         TEXT        NOT NULL,
+    oidc_subject TEXT        NOT NULL UNIQUE,
+    created_at   TIMESTAMPTZ DEFAULT now()
 );
 
 -- ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ CREATE POLICY thoughts_user_isolation ON thoughts
     );
 
 -- mcp_users is readable by the app role but not subject to per-user RLS
--- (the server needs to look up any user by access_key at auth time).
+-- (the server needs to look up any user by oidc_subject at auth time).
 
 -- ---------------------------------------------------------------------------
 -- Semantic search function

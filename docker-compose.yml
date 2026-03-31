@@ -32,8 +32,10 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD}@db:5432/openbrain
+      DATABASE_URL: ${DATABASE_URL}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      AUTHELIA_ISSUER_URL: https://auth.x1024.net
+      OIDC_CLIENT_ID: engram
       PORT: "8080"
     networks:
       - caddy_network

@@ -37,6 +37,7 @@ type ThoughtMetadata struct {
 type App struct {
 	Pool          *pgxpool.Pool
 	OpenRouterKey string
+	OIDC          *OIDCVerifier
 }
 
 // New creates an App, connecting to Postgres with pgvector type registration.
@@ -74,7 +75,7 @@ func (a *App) WithUserTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, "SET LOCAL app.current_user_id = $1", userID); err != nil {
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL app.current_user_id = '%s'", userID)); err != nil {
 		return fmt.Errorf("set user context: %w", err)
 	}
 	if err := fn(tx); err != nil {
