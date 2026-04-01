@@ -91,12 +91,14 @@ func main() {
 	mcpHandler := server.NewStreamableHTTPServer(s)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", authMiddleware(app, mcpHandler))
+	mux.Handle("/mcp", authMiddleware(app, mcpHandler))
+	mux.Handle("/mcp/", authMiddleware(app, mcpHandler))
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", oauthMetadataHandler(issuerURL, clientID))
 	mux.HandleFunc("POST /oauth/register", clientRegistrationHandler(clientID))
 	mux.HandleFunc("GET /oauth/authorize", oauthAuthorizeHandler(issuerURL, clientID))
 	mux.HandleFunc("GET /oauth/callback", oauthCallbackHandler())
 	mux.HandleFunc("POST /oauth/token", oauthTokenHandler(issuerURL, clientID))
+	RegisterWebHandlers(mux, app)
 
 	log.Printf("Open Brain MCP server listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
