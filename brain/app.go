@@ -100,8 +100,8 @@ func (a *App) GetEmbedding(ctx context.Context, text string) (pgvector.Vector, e
 	}
 	defer resp.Body.Close()
 
+	b, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
 		return pgvector.Vector{}, fmt.Errorf("embedding API error %d: %s", resp.StatusCode, string(b))
 	}
 
@@ -110,11 +110,11 @@ func (a *App) GetEmbedding(ctx context.Context, text string) (pgvector.Vector, e
 			Embedding []float32 `json:"embedding"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return pgvector.Vector{}, err
+	if err := json.Unmarshal(b, &result); err != nil {
+		return pgvector.Vector{}, fmt.Errorf("embedding decode: %w (body: %s)", err, string(b))
 	}
 	if len(result.Data) == 0 {
-		return pgvector.Vector{}, fmt.Errorf("no embeddings returned")
+		return pgvector.Vector{}, fmt.Errorf("no embeddings returned (body: %s)", string(b))
 	}
 	return pgvector.NewVector(result.Data[0].Embedding), nil
 }
