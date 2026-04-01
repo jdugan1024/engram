@@ -99,6 +99,7 @@ func main() {
 	mux.HandleFunc("GET /oauth/callback", oauthCallbackHandler())
 	mux.HandleFunc("POST /oauth/token", oauthTokenHandler(issuerURL, clientID))
 	RegisterWebHandlers(mux, app)
+	RegisterPWAHandlers(mux)
 
 	log.Printf("Open Brain MCP server listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
