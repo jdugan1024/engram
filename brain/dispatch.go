@@ -10,11 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	pgvector "github.com/pgvector/pgvector-go"
 )
 
 // DispatchTool names the tool the LLM chose to invoke.
@@ -167,69 +163,4 @@ func (a *App) DispatchCapture(ctx context.Context, text string) (*DispatchResult
 func captureThoughtFallback(text string) *DispatchResult {
 	p, _ := json.Marshal(CaptureThoughtParams{Content: text})
 	return &DispatchResult{Tool: ToolCaptureThought, Params: p}
-}
-
-// SaveThought captures a thought with embedding + metadata, returning a
-// human-readable summary. Used by the web capture handler for capture_thought
-// and as a fallback for other tools.
-func (a *App) SaveThought(ctx context.Context, content, source string) (string, error) {
-	type embResult struct {
-		v   pgvector.Vector
-		err error
-	}
-	type metaResult struct {
-		meta *ThoughtMetadata
-		err  error
-	}
-
-	embCh := make(chan embResult, 1)
-	metaCh := make(chan metaResult, 1)
-
-	go func() {
-		v, err := a.GetEmbedding(ctx, content)
-		embCh <- embResult{v, err}
-	}()
-	go func() {
-		meta, err := a.ExtractMetadata(ctx, content)
-		metaCh <- metaResult{meta, err}
-	}()
-
-	er := <-embCh
-	mr := <-metaCh
-
-	if er.err != nil {
-		return "", fmt.Errorf("embedding: %w", er.err)
-	}
-	if mr.err != nil {
-		return "", fmt.Errorf("metadata: %w", mr.err)
-	}
-
-	meta := mr.meta
-	meta.Source = source
-	metaJSON, _ := json.Marshal(meta)
-
-	err := a.WithUserTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO thoughts (user_id, content, embedding, metadata)
-			 VALUES (current_setting('app.current_user_id')::uuid, $1, $2, $3)`,
-			content, er.v, metaJSON,
-		)
-		return err
-	})
-	if err != nil {
-		return "", fmt.Errorf("save thought: %w", err)
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Captured as %s", meta.Type)
-	if len(meta.Topics) > 0 {
-		fmt.Fprintf(&sb, " — %s", strings.Join(meta.Topics, ", "))
-	}
-	if len(meta.People) > 0 {
-		fmt.Fprintf(&sb, " | people: %s", strings.Join(meta.People, ", "))
-	}
-	if len(meta.ActionItems) > 0 {
-		fmt.Fprintf(&sb, " | actions: %s", strings.Join(meta.ActionItems, "; "))
-	}
-	return sb.String(), nil
 }

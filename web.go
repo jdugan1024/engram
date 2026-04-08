@@ -15,15 +15,16 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"open-brain-go/brain"
+	"open-brain-go/brain/service"
 )
 
 //go:embed web/index.html
 var webUI string
 
 // RegisterWebHandlers adds the web UI and capture endpoint to the mux.
-func RegisterWebHandlers(mux *http.ServeMux, a *brain.App) {
+func RegisterWebHandlers(mux *http.ServeMux, a *brain.App, ts *service.ThoughtService) {
 	mux.HandleFunc("/", serveWebUI())
-	mux.Handle("POST /capture", authMiddleware(a, http.HandlerFunc(webCaptureHandler(a))))
+	mux.Handle("POST /capture", authMiddleware(a, http.HandlerFunc(webCaptureHandler(a, ts))))
 }
 
 func serveWebUI() http.HandlerFunc {
@@ -51,7 +52,7 @@ type captureResponse struct {
 	Message string `json:"message"`
 }
 
-func webCaptureHandler(a *brain.App) http.HandlerFunc {
+func webCaptureHandler(a *brain.App, ts *service.ThoughtService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req captureRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Text == "" {
@@ -66,7 +67,7 @@ func webCaptureHandler(a *brain.App) http.HandlerFunc {
 			return
 		}
 
-		toolUsed, message, err := executeDispatch(r.Context(), a, result)
+		toolUsed, message, err := executeDispatch(r.Context(), a, ts, result)
 		if err != nil {
 			log.Printf("execute error (tool=%s): %v", result.Tool, err)
 			http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
@@ -78,7 +79,7 @@ func webCaptureHandler(a *brain.App) http.HandlerFunc {
 	}
 }
 
-func executeDispatch(ctx context.Context, a *brain.App, result *brain.DispatchResult) (toolUsed, message string, err error) {
+func executeDispatch(ctx context.Context, a *brain.App, ts *service.ThoughtService, result *brain.DispatchResult) (toolUsed, message string, err error) {
 	switch result.Tool {
 
 	case brain.ToolCaptureThought:
@@ -86,7 +87,7 @@ func executeDispatch(ctx context.Context, a *brain.App, result *brain.DispatchRe
 		if err := json.Unmarshal(result.Params, &p); err != nil {
 			return "", "", err
 		}
-		msg, err := a.SaveThought(ctx, p.Content, "web")
+		msg, err := ts.Capture(ctx, p.Content, "web")
 		return string(brain.ToolCaptureThought), msg, err
 
 	case brain.ToolLogInteraction:
@@ -94,7 +95,7 @@ func executeDispatch(ctx context.Context, a *brain.App, result *brain.DispatchRe
 		if err := json.Unmarshal(result.Params, &p); err != nil {
 			return "", "", err
 		}
-		return executeLogInteraction(ctx, a, p)
+		return executeLogInteraction(ctx, a, ts, p)
 
 	case brain.ToolAddContact:
 		var p brain.AddContactParams
@@ -146,7 +147,7 @@ func executeDispatch(ctx context.Context, a *brain.App, result *brain.DispatchRe
 			return "", "", err
 		}
 		if p.EventDate == "" {
-			msg, err := a.SaveThought(ctx, "Important date: "+p.Title+" "+p.Notes, "web")
+			msg, err := ts.Capture(ctx, "Important date: "+p.Title+" "+p.Notes, "web")
 			return string(brain.ToolCaptureThought), msg, err
 		}
 		err := a.WithUserTx(ctx, func(tx pgx.Tx) error {
@@ -170,12 +171,12 @@ func executeDispatch(ctx context.Context, a *brain.App, result *brain.DispatchRe
 		return executeAddJobPosting(ctx, a, p)
 
 	default:
-		msg, err := a.SaveThought(ctx, string(result.Params), "web")
+		msg, err := ts.Capture(ctx, string(result.Params), "web")
 		return string(brain.ToolCaptureThought), msg, err
 	}
 }
 
-func executeLogInteraction(ctx context.Context, a *brain.App, p brain.LogInteractionParams) (string, string, error) {
+func executeLogInteraction(ctx context.Context, a *brain.App, ts *service.ThoughtService, p brain.LogInteractionParams) (string, string, error) {
 	var contactID string
 	var contactName string
 
@@ -195,7 +196,7 @@ func executeLogInteraction(ctx context.Context, a *brain.App, p brain.LogInterac
 		if p.FollowUpNotes != "" {
 			content += " | Follow-up: " + p.FollowUpNotes
 		}
-		_, err := a.SaveThought(ctx, content, "web")
+		_, err := ts.Capture(ctx, content, "web")
 		return string(brain.ToolCaptureThought),
 			fmt.Sprintf("No contact found for '%s' — saved as note", p.PersonName),
 			err

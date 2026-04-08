@@ -20,6 +20,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"open-brain-go/brain"
+	"open-brain-go/brain/service"
 	"open-brain-go/core"
 	"open-brain-go/extensions/calendar"
 	"open-brain-go/extensions/crm"
@@ -78,9 +79,11 @@ func main() {
 	app.OIDC = oidcVerifier
 	log.Println("OIDC verifier initialized")
 
+	ts := service.NewThoughtService(app)
+
 	s := server.NewMCPServer("open-brain", "1.0.0")
 
-	core.Register(s, app)
+	core.Register(s, app, ts)
 	household.Register(s, app)
 	maintenance.Register(s, app)
 	calendar.Register(s, app)
@@ -98,7 +101,7 @@ func main() {
 	mux.HandleFunc("GET /oauth/authorize", oauthAuthorizeHandler(issuerURL, clientID))
 	mux.HandleFunc("GET /oauth/callback", oauthCallbackHandler())
 	mux.HandleFunc("POST /oauth/token", oauthTokenHandler(issuerURL, clientID))
-	RegisterWebHandlers(mux, app)
+	RegisterWebHandlers(mux, app, ts)
 	RegisterPWAHandlers(mux)
 
 	log.Printf("Open Brain MCP server listening on :%s", port)

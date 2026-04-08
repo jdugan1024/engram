@@ -13,13 +13,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	pgvector "github.com/pgvector/pgvector-go"
 
 	"open-brain-go/brain"
+	"open-brain-go/brain/service"
 )
 
 // Register adds the four core thought tools to the MCP server.
-func Register(s *server.MCPServer, a *brain.App) {
+func Register(s *server.MCPServer, a *brain.App, ts *service.ThoughtService) {
 	s.AddTool(mcp.NewTool("search_thoughts",
 		mcp.WithDescription("Search captured thoughts by meaning. Use this when the user asks about a topic, person, or idea they've previously captured."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("What to search for")),
@@ -43,7 +43,7 @@ func Register(s *server.MCPServer, a *brain.App) {
 	s.AddTool(mcp.NewTool("capture_thought",
 		mcp.WithDescription("Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically."),
 		mcp.WithString("content", mcp.Required(), mcp.Description("The thought to capture — a clear, standalone statement that will make sense when retrieved later")),
-	), captureThought(a))
+	), captureThought(ts))
 }
 
 func searchThoughts(a *brain.App) server.ToolHandlerFunc {
@@ -303,72 +303,16 @@ func thoughtStats(a *brain.App) server.ToolHandlerFunc {
 	}
 }
 
-func captureThought(a *brain.App) server.ToolHandlerFunc {
+func captureThought(ts *service.ThoughtService) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		content, _ := req.GetArguments()["content"].(string)
 		if content == "" {
 			return brain.ToolError("content is required"), nil
 		}
-
-		// Fetch embedding and metadata in parallel.
-		type embResult  struct {
-			v   pgvector.Vector
-			err error
-		}
-		type metaResult struct {
-			meta *brain.ThoughtMetadata
-			err  error
-		}
-
-		embCh  := make(chan embResult, 1)
-		metaCh := make(chan metaResult, 1)
-
-		go func() {
-			v, err := a.GetEmbedding(ctx, content)
-			embCh <- embResult{v, err}
-		}()
-		go func() {
-			meta, err := a.ExtractMetadata(ctx, content)
-			metaCh <- metaResult{meta, err}
-		}()
-
-		er := <-embCh
-		mr := <-metaCh
-
-		if er.err != nil {
-			return brain.ToolError("Embedding error: " + er.err.Error()), nil
-		}
-		if mr.err != nil {
-			return brain.ToolError("Metadata error: " + mr.err.Error()), nil
-		}
-
-		meta := mr.meta
-		meta.Source = "mcp"
-		metaJSON, _ := json.Marshal(meta)
-
-		err := a.WithUserTx(ctx, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx,
-				`INSERT INTO thoughts (user_id, content, embedding, metadata)
-				 VALUES (current_setting('app.current_user_id')::uuid, $1, $2, $3)`,
-				content, er.v, metaJSON,
-			)
-			return err
-		})
+		summary, err := ts.Capture(ctx, content, "mcp")
 		if err != nil {
 			return brain.ToolError("Failed to capture: " + err.Error()), nil
 		}
-
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "Captured as %s", meta.Type)
-		if len(meta.Topics) > 0 {
-			fmt.Fprintf(&sb, " — %s", strings.Join(meta.Topics, ", "))
-		}
-		if len(meta.People) > 0 {
-			fmt.Fprintf(&sb, " | People: %s", strings.Join(meta.People, ", "))
-		}
-		if len(meta.ActionItems) > 0 {
-			fmt.Fprintf(&sb, " | Actions: %s", strings.Join(meta.ActionItems, "; "))
-		}
-		return brain.TextResult(sb.String()), nil
+		return brain.TextResult(summary), nil
 	}
 }
