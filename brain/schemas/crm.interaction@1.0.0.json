@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "crm.interaction",
+  "type": "object",
+  "required": ["person_name", "interaction_type", "summary", "interaction_date"],
+  "properties": {
+    "person_name":          { "type": "string", "minLength": 1 },
+    "interaction_type":     { "type": "string", "enum": ["meeting", "call", "coffee", "email", "conference", "linkedin", "other"] },
+    "summary":              { "type": "string", "minLength": 1 },
+    "follow_up_needed":     { "type": "boolean", "default": false },
+    "follow_up_notes":      { "type": "string" },
+    "interaction_date":     { "type": "string", "format": "date" },
+    "resolved_contact_id":  { "type": "string", "format": "uuid" },
+    "contact_ref": {
+      "type": "object",
+      "properties": {
+        "entry_id":    { "type": "string", "format": "uuid" },
+        "external_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "note.thought",
+  "type": "object",
+  "required": ["content"],
+  "properties": {
+    "content":          { "type": "string", "minLength": 1 },
+    "topics":           { "type": "array", "items": { "type": "string" }, "default": [] },
+    "people":           { "type": "array", "items": { "type": "string" }, "default": [] },
+    "action_items":     { "type": "array", "items": { "type": "string" }, "default": [] },
+    "dates_mentioned":  { "type": "array", "items": { "type": "string", "format": "date" }, "default": [] },
+    "thought_type":     { "type": "string", "enum": ["observation", "task", "idea", "reference", "person_note"] }
+  },
+  "additionalProperties": false
+}

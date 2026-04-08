@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "crm.contact",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name":         { "type": "string", "minLength": 1 },
+    "company":      { "type": "string" },
+    "title":        { "type": "string" },
+    "email":        { "type": "string", "format": "email" },
+    "phone":        { "type": "string" },
+    "linkedin_url": { "type": "string", "format": "uri" },
+    "how_we_met":   { "type": "string" },
+    "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
+    "notes":        { "type": "string" }
+  },
+  "additionalProperties": false
+}

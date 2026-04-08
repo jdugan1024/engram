@@ -116,3 +116,55 @@ BEGIN
     LIMIT match_count;
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Canonical entries table
+--
+-- All captured records — thoughts, contacts, maintenance tasks, job applications,
+-- etc. — are stored here as typed JSONB payloads validated against JSON Schemas.
+-- The record_type field (e.g. 'crm.contact', 'note.thought') determines which
+-- schema applies. source tracks the capture path ('web', 'mcp', 'migrated').
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS entries (
+    id              UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID             NOT NULL REFERENCES mcp_users(id) ON DELETE CASCADE,
+    record_type     TEXT             NOT NULL,
+    schema_version  TEXT             NOT NULL DEFAULT '1.0.0',
+    source          TEXT             NOT NULL DEFAULT 'web',
+    confidence      DOUBLE PRECISION,
+    failure_mode    TEXT,            -- 'low_confidence' | 'validation_failure' | NULL
+    content_text    TEXT             NOT NULL,
+    payload         JSONB            NOT NULL,
+    tags            JSONB            NOT NULL DEFAULT '[]'::jsonb,
+    entities        JSONB            NOT NULL DEFAULT '{}'::jsonb,
+    embedding       VECTOR(1536),
+    created_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_entries_user_id       ON entries (user_id);
+CREATE INDEX IF NOT EXISTS idx_entries_record_type   ON entries (user_id, record_type);
+CREATE INDEX IF NOT EXISTS idx_entries_created_at    ON entries (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_payload_gin   ON entries USING gin (payload);
+CREATE INDEX IF NOT EXISTS idx_entries_tags_gin      ON entries USING gin (tags);
+CREATE INDEX IF NOT EXISTS idx_entries_entities_gin  ON entries USING gin (entities);
+CREATE INDEX IF NOT EXISTS idx_entries_embedding     ON entries USING hnsw (embedding vector_cosine_ops);
+
+ALTER TABLE entries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY entries_user_isolation ON entries
+    FOR ALL
+    USING (
+        current_setting('app.current_user_id', true) IS NOT NULL
+        AND user_id = current_setting('app.current_user_id', true)::uuid
+    )
+    WITH CHECK (
+        current_setting('app.current_user_id', true) IS NOT NULL
+        AND user_id = current_setting('app.current_user_id', true)::uuid
+    );
+
+DROP TRIGGER IF EXISTS entries_updated_at ON entries;
+CREATE TRIGGER entries_updated_at
+    BEFORE UPDATE ON entries
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "maintenance.task",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name":           { "type": "string", "minLength": 1 },
+    "category":       { "type": "string" },
+    "location":       { "type": "string" },
+    "frequency_days": { "type": "integer", "minimum": 1 },
+    "next_due":       { "type": "string", "format": "date" },
+    "last_completed": { "type": "string", "format": "date" },
+    "notes":          { "type": "string" }
+  },
+  "additionalProperties": false
+}

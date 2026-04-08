@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "jobhunt.application",
+  "type": "object",
+  "required": ["company_name", "title", "status", "applied_date"],
+  "properties": {
+    "company_name":     { "type": "string", "minLength": 1 },
+    "title":            { "type": "string", "minLength": 1 },
+    "posting_url":      { "type": "string", "format": "uri" },
+    "status":           { "type": "string", "enum": ["applied", "screening", "interviewing", "offer", "accepted", "rejected", "withdrawn"] },
+    "applied_date":     { "type": "string", "format": "date" },
+    "resume_version":   { "type": "string" },
+    "referral_contact": { "type": "string" },
+    "salary_min":       { "type": "integer", "minimum": 0 },
+    "salary_max":       { "type": "integer", "minimum": 0 },
+    "notes":            { "type": "string" }
+  },
+  "additionalProperties": false
+}
