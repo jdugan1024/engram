@@ -1,7 +1,6 @@
 // ABOUTME: Entry extractor — routes free-form text to the right record type.
 // ABOUTME: Tries deterministic pattern rules first; falls back to one-shot LLM extraction.
 // ABOUTME: Replaces brain/dispatch.go:DispatchCapture for the web capture path.
-// ABOUTME: Enabled by the ENGRAM_SCHEMA_EXTRACTOR=true feature flag.
 
 package brain
 
@@ -14,15 +13,8 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strings"
 	"time"
 )
-
-// ExtractorEnabled reports whether the new schema-based extractor is active.
-// Controlled by ENGRAM_SCHEMA_EXTRACTOR=true.
-func ExtractorEnabled() bool {
-	return strings.ToLower(os.Getenv("ENGRAM_SCHEMA_EXTRACTOR")) == "true"
-}
 
 // MinConfidence returns the configured confidence threshold (default 0.7).
 func MinConfidence() float64 {
