@@ -82,6 +82,7 @@ func main() {
 
 	core.Register(s, app)
 	core.RegisterAddItem(s, app, es)
+	core.RegisterSearch(s, app)
 	household.Register(s, app)
 	calendar.Register(s, app)
 	meals.Register(s, app)
