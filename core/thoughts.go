@@ -1,5 +1,6 @@
-// ABOUTME: Core Open Brain tools: capture, search, list, and summarize thoughts.
+// ABOUTME: Core thought tools: search, list, and summarize entries of type note.thought.
 // ABOUTME: Registered into the single MCP server alongside any active extensions.
+// ABOUTME: capture_thought is superseded by add_item; search/list/stats query the entries table.
 
 package core
 
@@ -15,11 +16,11 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"open-brain-go/brain"
-	"open-brain-go/brain/service"
 )
 
-// Register adds the four core thought tools to the MCP server.
-func Register(s *server.MCPServer, a *brain.App, ts *service.ThoughtService) {
+// Register adds the core thought read tools to the MCP server.
+// capture_thought is removed — use add_item thought <content> instead.
+func Register(s *server.MCPServer, a *brain.App) {
 	s.AddTool(mcp.NewTool("search_thoughts",
 		mcp.WithDescription("Search captured thoughts by meaning. Use this when the user asks about a topic, person, or idea they've previously captured."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("What to search for")),
@@ -39,11 +40,15 @@ func Register(s *server.MCPServer, a *brain.App, ts *service.ThoughtService) {
 	s.AddTool(mcp.NewTool("thought_stats",
 		mcp.WithDescription("Get a summary of all captured thoughts: totals, types, top topics, and people."),
 	), thoughtStats(a))
+}
 
-	s.AddTool(mcp.NewTool("capture_thought",
-		mcp.WithDescription("Save a new thought to the Open Brain. Generates an embedding and extracts metadata automatically."),
-		mcp.WithString("content", mcp.Required(), mcp.Description("The thought to capture — a clear, standalone statement that will make sense when retrieved later")),
-	), captureThought(ts))
+// thoughtPayload mirrors the note.thought JSON Schema fields we read back.
+type thoughtPayload struct {
+	Content     string   `json:"content"`
+	ThoughtType string   `json:"thought_type"`
+	Topics      []string `json:"topics"`
+	People      []string `json:"people"`
+	ActionItems []string `json:"action_items"`
 }
 
 func searchThoughts(a *brain.App) server.ToolHandlerFunc {
@@ -67,16 +72,25 @@ func searchThoughts(a *brain.App) server.ToolHandlerFunc {
 		}
 
 		type result struct {
-			Content    string
-			Metadata   brain.ThoughtMetadata
-			Similarity float64
-			CreatedAt  time.Time
+			ContentText string
+			Payload     thoughtPayload
+			Similarity  float64
+			CreatedAt   time.Time
 		}
 		var results []result
 
 		err = a.WithUserTx(ctx, func(tx pgx.Tx) error {
-			rows, err := tx.Query(ctx,
-				"SELECT content, metadata, similarity, created_at FROM match_thoughts($1, $2, $3)",
+			rows, err := tx.Query(ctx, `
+				SELECT content_text, payload,
+				       1 - (embedding <=> $1) AS similarity,
+				       created_at
+				FROM entries
+				WHERE record_type = 'note.thought'
+				  AND deleted_at IS NULL
+				  AND embedding IS NOT NULL
+				  AND 1 - (embedding <=> $1) > $2
+				ORDER BY embedding <=> $1
+				LIMIT $3`,
 				emb, threshold, limit,
 			)
 			if err != nil {
@@ -85,11 +99,11 @@ func searchThoughts(a *brain.App) server.ToolHandlerFunc {
 			defer rows.Close()
 			for rows.Next() {
 				var r result
-				var metaRaw []byte
-				if err := rows.Scan(&r.Content, &metaRaw, &r.Similarity, &r.CreatedAt); err != nil {
+				var payloadRaw []byte
+				if err := rows.Scan(&r.ContentText, &payloadRaw, &r.Similarity, &r.CreatedAt); err != nil {
 					return err
 				}
-				json.Unmarshal(metaRaw, &r.Metadata)
+				json.Unmarshal(payloadRaw, &r.Payload)
 				results = append(results, r)
 			}
 			return rows.Err()
@@ -106,17 +120,17 @@ func searchThoughts(a *brain.App) server.ToolHandlerFunc {
 		fmt.Fprintf(&sb, "Found %d thought(s):\n\n", len(results))
 		for i, r := range results {
 			fmt.Fprintf(&sb, "--- Result %d (%.1f%% match) ---\n", i+1, r.Similarity*100)
-			fmt.Fprintf(&sb, "Captured: %s\nType: %s\n", r.CreatedAt.Format("2006-01-02"), r.Metadata.Type)
-			if len(r.Metadata.Topics) > 0 {
-				fmt.Fprintf(&sb, "Topics: %s\n", strings.Join(r.Metadata.Topics, ", "))
+			fmt.Fprintf(&sb, "Captured: %s\nType: %s\n", r.CreatedAt.Format("2006-01-02"), r.Payload.ThoughtType)
+			if len(r.Payload.Topics) > 0 {
+				fmt.Fprintf(&sb, "Topics: %s\n", strings.Join(r.Payload.Topics, ", "))
 			}
-			if len(r.Metadata.People) > 0 {
-				fmt.Fprintf(&sb, "People: %s\n", strings.Join(r.Metadata.People, ", "))
+			if len(r.Payload.People) > 0 {
+				fmt.Fprintf(&sb, "People: %s\n", strings.Join(r.Payload.People, ", "))
 			}
-			if len(r.Metadata.ActionItems) > 0 {
-				fmt.Fprintf(&sb, "Actions: %s\n", strings.Join(r.Metadata.ActionItems, "; "))
+			if len(r.Payload.ActionItems) > 0 {
+				fmt.Fprintf(&sb, "Actions: %s\n", strings.Join(r.Payload.ActionItems, "; "))
 			}
-			fmt.Fprintf(&sb, "\n%s\n\n", r.Content)
+			fmt.Fprintf(&sb, "\n%s\n\n", r.Payload.Content)
 		}
 		return brain.TextResult(sb.String()), nil
 	}
@@ -137,32 +151,30 @@ func listThoughts(a *brain.App) server.ToolHandlerFunc {
 		}
 
 		type thought struct {
-			Content   string
-			Metadata  brain.ThoughtMetadata
+			Payload   thoughtPayload
 			CreatedAt time.Time
 		}
 		var thoughts []thought
 
 		err := a.WithUserTx(ctx, func(tx pgx.Tx) error {
-			sql := `SELECT content, metadata, created_at FROM thoughts WHERE true`
+			sql := `SELECT payload, created_at FROM entries WHERE record_type = 'note.thought' AND deleted_at IS NULL`
 			args := []any{}
 			n := 1
 
 			if typeFilter != "" {
-				b, _ := json.Marshal(map[string]string{"type": typeFilter})
-				sql += fmt.Sprintf(" AND metadata @> $%d::jsonb", n)
-				args = append(args, string(b))
+				sql += fmt.Sprintf(" AND payload->>'thought_type' = $%d", n)
+				args = append(args, typeFilter)
 				n++
 			}
 			if topicFilter != "" {
-				b, _ := json.Marshal(map[string][]string{"topics": {topicFilter}})
-				sql += fmt.Sprintf(" AND metadata @> $%d::jsonb", n)
+				b, _ := json.Marshal([]string{topicFilter})
+				sql += fmt.Sprintf(" AND payload->'topics' @> $%d::jsonb", n)
 				args = append(args, string(b))
 				n++
 			}
 			if personFilter != "" {
-				b, _ := json.Marshal(map[string][]string{"people": {personFilter}})
-				sql += fmt.Sprintf(" AND metadata @> $%d::jsonb", n)
+				b, _ := json.Marshal([]string{personFilter})
+				sql += fmt.Sprintf(" AND payload->'people' @> $%d::jsonb", n)
 				args = append(args, string(b))
 				n++
 			}
@@ -181,11 +193,11 @@ func listThoughts(a *brain.App) server.ToolHandlerFunc {
 			defer rows.Close()
 			for rows.Next() {
 				var t thought
-				var metaRaw []byte
-				if err := rows.Scan(&t.Content, &metaRaw, &t.CreatedAt); err != nil {
+				var payloadRaw []byte
+				if err := rows.Scan(&payloadRaw, &t.CreatedAt); err != nil {
 					return err
 				}
-				json.Unmarshal(metaRaw, &t.Metadata)
+				json.Unmarshal(payloadRaw, &t.Payload)
 				thoughts = append(thoughts, t)
 			}
 			return rows.Err()
@@ -201,15 +213,16 @@ func listThoughts(a *brain.App) server.ToolHandlerFunc {
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "%d recent thought(s):\n\n", len(thoughts))
 		for i, t := range thoughts {
-			ttype := t.Metadata.Type
+			ttype := t.Payload.ThoughtType
 			if ttype == "" {
 				ttype = "??"
 			}
 			meta := ttype
-			if tags := strings.Join(t.Metadata.Topics, ", "); tags != "" {
+			if tags := strings.Join(t.Payload.Topics, ", "); tags != "" {
 				meta += " - " + tags
 			}
-			fmt.Fprintf(&sb, "%d. [%s] (%s)\n   %s\n\n", i+1, t.CreatedAt.Format("2006-01-02"), meta, t.Content)
+			fmt.Fprintf(&sb, "%d. [%s] (%s)\n   %s\n\n",
+				i+1, t.CreatedAt.Format("2006-01-02"), meta, t.Payload.Content)
 		}
 		return brain.TextResult(sb.String()), nil
 	}
@@ -222,8 +235,9 @@ func thoughtStats(a *brain.App) server.ToolHandlerFunc {
 		err := a.WithUserTx(ctx, func(tx pgx.Tx) error {
 			var total int
 			var earliest, latest time.Time
-			if err := tx.QueryRow(ctx,
-				`SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM thoughts`,
+			if err := tx.QueryRow(ctx, `
+				SELECT COUNT(*), MIN(created_at), MAX(created_at)
+				FROM entries WHERE record_type = 'note.thought' AND deleted_at IS NULL`,
 			).Scan(&total, &earliest, &latest); err != nil {
 				return err
 			}
@@ -233,66 +247,96 @@ func thoughtStats(a *brain.App) server.ToolHandlerFunc {
 					earliest.Format("2006-01-02"), latest.Format("2006-01-02")))
 			}
 
-			for _, query := range []struct {
-				label string
-				sql   string
-			}{
-				{"Types", `SELECT metadata->>'type', COUNT(*) FROM thoughts WHERE metadata ? 'type' GROUP BY 1 ORDER BY 2 DESC`},
-			} {
-				rows, err := tx.Query(ctx, query.sql)
-				if err != nil {
+			// Types breakdown.
+			rows, err := tx.Query(ctx, `
+				SELECT COALESCE(payload->>'thought_type', 'unknown'), COUNT(*)
+				FROM entries
+				WHERE record_type = 'note.thought' AND deleted_at IS NULL
+				GROUP BY 1 ORDER BY 2 DESC`)
+			if err != nil {
+				return err
+			}
+			var section []string
+			for rows.Next() {
+				var k string
+				var c int
+				if err := rows.Scan(&k, &c); err != nil {
+					rows.Close()
 					return err
 				}
-				var section []string
-				for rows.Next() {
-					var k string
-					var c int
-					if err := rows.Scan(&k, &c); err != nil {
-						rows.Close()
-						return err
-					}
-					section = append(section, fmt.Sprintf("  %s: %d", k, c))
-				}
-				rows.Close()
-				if err := rows.Err(); err != nil {
-					return err
-				}
-				if len(section) > 0 {
-					lines = append(lines, "", query.label+":")
-					lines = append(lines, section...)
-				}
+				section = append(section, fmt.Sprintf("  %s: %d", k, c))
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if len(section) > 0 {
+				lines = append(lines, "", "Types:")
+				lines = append(lines, section...)
 			}
 
-			for _, query := range []struct {
-				label string
-				sql   string
-			}{
-				{"Top topics", `SELECT topic, COUNT(*) FROM thoughts, jsonb_array_elements_text(metadata->'topics') AS topic WHERE metadata ? 'topics' GROUP BY topic ORDER BY 2 DESC LIMIT 10`},
-				{"People mentioned", `SELECT person, COUNT(*) FROM thoughts, jsonb_array_elements_text(metadata->'people') AS person WHERE metadata ? 'people' GROUP BY person ORDER BY 2 DESC LIMIT 10`},
-			} {
-				rows, err := tx.Query(ctx, query.sql)
-				if err != nil {
-					return err
-				}
-				var section []string
-				for rows.Next() {
-					var k string
-					var c int
-					if err := rows.Scan(&k, &c); err != nil {
-						rows.Close()
-						return err
-					}
-					section = append(section, fmt.Sprintf("  %s: %d", k, c))
-				}
-				rows.Close()
-				if err := rows.Err(); err != nil {
-					return err
-				}
-				if len(section) > 0 {
-					lines = append(lines, "", query.label+":")
-					lines = append(lines, section...)
-				}
+			// Top topics.
+			rows2, err := tx.Query(ctx, `
+				SELECT topic, COUNT(*)
+				FROM entries,
+				     jsonb_array_elements_text(payload->'topics') AS topic
+				WHERE record_type = 'note.thought'
+				  AND deleted_at IS NULL
+				  AND payload ? 'topics'
+				GROUP BY topic ORDER BY 2 DESC LIMIT 10`)
+			if err != nil {
+				return err
 			}
+			var topics []string
+			for rows2.Next() {
+				var k string
+				var c int
+				if err := rows2.Scan(&k, &c); err != nil {
+					rows2.Close()
+					return err
+				}
+				topics = append(topics, fmt.Sprintf("  %s: %d", k, c))
+			}
+			rows2.Close()
+			if err := rows2.Err(); err != nil {
+				return err
+			}
+			if len(topics) > 0 {
+				lines = append(lines, "", "Top topics:")
+				lines = append(lines, topics...)
+			}
+
+			// People mentioned.
+			rows3, err := tx.Query(ctx, `
+				SELECT person, COUNT(*)
+				FROM entries,
+				     jsonb_array_elements_text(payload->'people') AS person
+				WHERE record_type = 'note.thought'
+				  AND deleted_at IS NULL
+				  AND payload ? 'people'
+				GROUP BY person ORDER BY 2 DESC LIMIT 10`)
+			if err != nil {
+				return err
+			}
+			var people []string
+			for rows3.Next() {
+				var k string
+				var c int
+				if err := rows3.Scan(&k, &c); err != nil {
+					rows3.Close()
+					return err
+				}
+				people = append(people, fmt.Sprintf("  %s: %d", k, c))
+			}
+			rows3.Close()
+			if err := rows3.Err(); err != nil {
+				return err
+			}
+			if len(people) > 0 {
+				lines = append(lines, "", "People mentioned:")
+				lines = append(lines, people...)
+			}
+
 			return nil
 		})
 		if err != nil {
@@ -300,19 +344,5 @@ func thoughtStats(a *brain.App) server.ToolHandlerFunc {
 		}
 
 		return brain.TextResult(strings.Join(lines, "\n")), nil
-	}
-}
-
-func captureThought(ts *service.ThoughtService) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		content, _ := req.GetArguments()["content"].(string)
-		if content == "" {
-			return brain.ToolError("content is required"), nil
-		}
-		summary, err := ts.Capture(ctx, content, "mcp")
-		if err != nil {
-			return brain.ToolError("Failed to capture: " + err.Error()), nil
-		}
-		return brain.TextResult(summary), nil
 	}
 }
