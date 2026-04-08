@@ -22,9 +22,9 @@ import (
 var webUI string
 
 // RegisterWebHandlers adds the web UI and capture endpoint to the mux.
-func RegisterWebHandlers(mux *http.ServeMux, a *brain.App, ts *service.ThoughtService) {
+func RegisterWebHandlers(mux *http.ServeMux, a *brain.App, ts *service.ThoughtService, es *service.EntryService) {
 	mux.HandleFunc("/", serveWebUI())
-	mux.Handle("POST /capture", authMiddleware(a, http.HandlerFunc(webCaptureHandler(a, ts))))
+	mux.Handle("POST /capture", authMiddleware(a, http.HandlerFunc(webCaptureHandler(a, ts, es))))
 }
 
 func serveWebUI() http.HandlerFunc {
@@ -52,7 +52,7 @@ type captureResponse struct {
 	Message string `json:"message"`
 }
 
-func webCaptureHandler(a *brain.App, ts *service.ThoughtService) http.HandlerFunc {
+func webCaptureHandler(a *brain.App, ts *service.ThoughtService, es *service.EntryService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req captureRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Text == "" {
@@ -60,6 +60,20 @@ func webCaptureHandler(a *brain.App, ts *service.ThoughtService) http.HandlerFun
 			return
 		}
 
+		// New schema-based extractor path (feature flag).
+		if brain.ExtractorEnabled() {
+			cr, err := es.Capture(r.Context(), req.Text, "web")
+			if err != nil {
+				log.Printf("entry capture error: %v", err)
+				http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(captureResponse{Tool: cr.RecordType, Message: cr.Message})
+			return
+		}
+
+		// Legacy dispatch path (used while ENGRAM_SCHEMA_EXTRACTOR is not set).
 		result, err := a.DispatchCapture(r.Context(), req.Text)
 		if err != nil {
 			log.Printf("dispatch error: %v", err)

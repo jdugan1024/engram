@@ -80,10 +80,12 @@ func main() {
 	log.Println("OIDC verifier initialized")
 
 	ts := service.NewThoughtService(app)
+	es := service.NewEntryService(app)
 
 	s := server.NewMCPServer("open-brain", "1.0.0")
 
 	core.Register(s, app, ts)
+	core.RegisterAddItem(s, app, es)
 	household.Register(s, app)
 	maintenance.Register(s, app)
 	calendar.Register(s, app)
@@ -101,7 +103,7 @@ func main() {
 	mux.HandleFunc("GET /oauth/authorize", oauthAuthorizeHandler(issuerURL, clientID))
 	mux.HandleFunc("GET /oauth/callback", oauthCallbackHandler())
 	mux.HandleFunc("POST /oauth/token", oauthTokenHandler(issuerURL, clientID))
-	RegisterWebHandlers(mux, app, ts)
+	RegisterWebHandlers(mux, app, ts, es)
 	RegisterPWAHandlers(mux)
 
 	log.Printf("Open Brain MCP server listening on :%s", port)
